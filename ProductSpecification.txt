@@ -1,0 +1,29 @@
+Product Specification Document
+==============================
+Product Name: DistRes Engine v2.0
+Version: 2.0.0
+Last Updated: 2026-05-22
+
+1. Overview
+-----------
+The Distributed Resource Access and Synchronisation Engine (DistRes) extends the
+ConRes (v1) concurrent engine into a distributed client-server system. Multiple
+client nodes connect to a single server node over TCP and share safe, coordinated
+read/write access to this specification file and the user-credential database.
+
+2. Requirements
+---------------
+- Distributed client-server communication over TCP sockets
+- Concurrent reads, single exclusive writer (read-write coordination)
+- Publish-subscribe notification of every committed write to all active clients
+- Layered architecture separating application/logic and data layers
+- Distributed fault tolerance via automatic reconnection and retries
+
+3. Change Log
+-------------
+
+[2026-05-28 00:40:04] ENG001: Hello 
+[2026-05-28 00:40:55] ENG002: hi
+[2026-05-28 00:41:13] ENG002: why
+[2026-05-28 00:42:04] ENG003: sorry
+[2026-05-28 00:42:13] ENG003: e
