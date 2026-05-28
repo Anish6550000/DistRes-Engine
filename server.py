@@ -157,13 +157,13 @@ class ClientHandler:
             f"{self._server.active_count()}/{MAX_SESSIONS}"
         )
 
-        # Hand the client an immediate snapshot of the resource so its UI is
-        # populated the moment it logs in.
-        ok, content, version = self._server.data.read_resource()
+        # Login confirms the session and tells the client the latest server-side
+        # version only. The actual file body is fetched only when the client
+        # explicitly sends READ, making the shared-lock read operation visible
+        # and realistic in the demo.
         self._respond(request_id, protocol.STATUS_OK,
                       message=f"Logged in as {user_id}",
-                      version=version,
-                      content=content if ok else "")
+                      version=self._server.data.version)
 
     def _require_session(self, request_id) -> bool:
         """Guard: every resource action requires an authenticated session."""
@@ -200,23 +200,24 @@ class ClientHandler:
             self._server.set_writer(self._user_id, active=True)
             self._server.log(f"WRITE     {self._user_id} acquired exclusive lock")
 
-        ok, content, version = self._server.data.write_resource(
+        ok, result_message, version = self._server.data.write_resource(
             self._user_id, text, on_acquired=on_acquired)
         self._server.set_writer(self._user_id, active=False)
 
         if not ok:
-            self._respond(request_id, protocol.STATUS_ERROR, message=content)
+            self._respond(request_id, protocol.STATUS_ERROR, message=result_message)
             return
 
-        # Reply to the writer first, then fan the update out to ALL clients.
+        # Reply to the writer first, then fan a metadata-only update to ALL
+        # clients. The published event intentionally does not contain the full
+        # file body; subscribers must send READ to obtain a fresh snapshot.
         self._respond(request_id, protocol.STATUS_OK,
-                      version=version, content=content)
+                      version=version, message=result_message)
         # ----- PUBLISH step of publish-subscribe -----
         self._server.broker.publish(protocol.TOPIC_RESOURCE_UPDATE, {
             "version": version,
             "updated_by": self._user_id,
             "summary": text,
-            "content": content,
         })
 
     def _handle_logout(self, request_id, message) -> None:

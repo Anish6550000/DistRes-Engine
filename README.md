@@ -6,9 +6,9 @@ Student ID: 100716820
 DistRes is the distributed (v2) follow-on to the ConRes concurrent engine from
 Course Work 1. Several **client nodes** connect over TCP to a single
 **server node** and share safe, coordinated read/write access to a credential
-database and a shared specification file. Every write is pushed to all connected
-clients through a publish–subscribe mechanism, and clients recover on their own
-if the connection drops.
+database and a shared specification file. Every write sends a metadata-only
+notification to all connected clients through a publish–subscribe mechanism, and
+clients recover on their own if the connection drops.
 
 ## Architecture at a glance
 
@@ -43,7 +43,6 @@ distres/
 ├── data_layer.py         # Data layer: SQLite credentials + shared file, behind the RW lock
 ├── rwlock.py             # Writer-preferring readers-writer lock with deadlock-avoidance timeout
 ├── protocol.py           # Shared wire protocol used by both client and server
-├── test_integration.py   # End-to-end test: concurrency, pub-sub, capacity, crash recovery
 ├── ProductSpecification.txt
 ├── requirements.txt
 └── architecture.png
@@ -64,8 +63,11 @@ python client_node.py --port 5003 --name "Node C"
 ```
 
 Then open `http://127.0.0.1:5001`, `:5002`, `:5003` in separate browser windows.
-Log in as different engineers, read/write the resource on one node, and watch the
-update appear on the others through the publish–subscribe feed.
+Log in as different engineers, press **Read Resource** to fetch a locked file
+snapshot, then write from one node. Other nodes receive a publish–subscribe
+notification immediately, but their file panel stays as a cached snapshot until
+they press **Read Resource** again. This makes the READ request visible rather
+than hiding it behind automatic UI refresh.
 
 A terminal client is also available:
 
@@ -94,23 +96,13 @@ python cli_client.py ENG004 Diana       # commands: read | write <text> | logout
   reads can't starve an update. Every acquire is timeout-bounded for
   deadlock avoidance.
 - **Publish–subscribe.** After a write commits, the server calls
-  `broker.publish(...)`, which fans the event out to every subscribed client.
-  A failed delivery only drops that one subscriber, so a dead client can't break
-  the broadcast.
+  `broker.publish(...)`, which fans a metadata-only event out to every subscribed
+  client. The event marks cached file views as stale; clients then issue an
+  explicit READ when they want the updated file body. A failed delivery only
+  drops that one subscriber, so a dead client can't break the broadcast.
 - **Fault tolerance.** If a socket drops, the server frees that client's session
   slot and subscription, and the client reconnects with exponential backoff and
   transparently re-logs-in.
-
-## Tests
-
-```bash
-python test_integration.py
-```
-
-Starts a real server subprocess and drives it with real socket clients to check
-login/auth, concurrent overlapping reads, exclusive writes, publish–subscribe
-fan-out to all clients, session-capacity limiting, and automatic recovery after
-the server is killed and restarted.
 
 ## Relationship to Course Work 1 (ConRes)
 

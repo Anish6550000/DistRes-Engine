@@ -50,8 +50,12 @@ _node = {
     "name": "Client Node",
     "connection": STATE_DISCONNECTED,
     "user": None,                 # (user_id, username) once logged in
-    "version": None,              # last known resource version
-    "content": "",                # last known resource content
+    "version": None,              # latest version advertised by the server
+    "content": "",                # last explicitly-read file snapshot
+    "content_version": None,      # version number of the local snapshot
+    "content_loaded": False,      # False until the user presses Read Resource
+    "content_stale": False,       # True when pub-sub reports a newer version
+    "status_message": "Login, then press Read Resource to fetch the file.",
     "notifications": deque(maxlen=20),  # pub-sub update feed (most recent last)
 }
 _conn: ServerConnection | None = None
@@ -60,17 +64,27 @@ _conn: ServerConnection | None = None
 def _on_event(message):
     """Publish-subscribe subscriber callback (runs on the listener thread).
 
-    Records the incoming update in the notification feed and refreshes the
-    locally cached resource so the dashboard reflects another node's write
-    without the user doing anything.
+    The update event is deliberately metadata-only. It tells the node that the
+    server-side file has changed, but it does NOT replace the local file view.
+    This keeps the READ operation meaningful: a client must explicitly press
+    Read Resource to acquire the shared lock and fetch a fresh file snapshot.
     """
     payload = message.get("payload", {})
+    new_version = payload.get("version")
     with _state_lock:
-        _node["version"] = payload.get("version")
-        if payload.get("content") is not None:
-            _node["content"] = payload["content"]
+        _node["version"] = new_version
+        if _node["content_loaded"] and new_version != _node["content_version"]:
+            _node["content_stale"] = True
+            _node["status_message"] = (
+                f"Resource updated to v{new_version}. "
+                "Your displayed file is a cached snapshot; press Read Resource to refresh."
+            )
+        else:
+            _node["status_message"] = (
+                f"Resource updated to v{new_version}. Press Read Resource to load it."
+            )
         _node["notifications"].append({
-            "version": payload.get("version"),
+            "version": new_version,
             "updated_by": payload.get("updated_by"),
             "summary": payload.get("summary"),
         })
@@ -102,6 +116,10 @@ def api_state():
             "username": user[1] if user else None,
             "version": _node["version"],
             "content": _node["content"],
+            "content_version": _node["content_version"],
+            "content_loaded": _node["content_loaded"],
+            "content_stale": _node["content_stale"],
+            "status_message": _node["status_message"],
             "notifications": list(_node["notifications"]),
         })
 
@@ -114,7 +132,14 @@ def api_login():
         with _state_lock:
             _node["user"] = (data["user_id"], data["username"])
             _node["version"] = resp.get("version")
-            _node["content"] = resp.get("content", "")
+            _node["content"] = ""
+            _node["content_version"] = None
+            _node["content_loaded"] = False
+            _node["content_stale"] = False
+            _node["status_message"] = (
+                "Logged in. File contents are not loaded yet; press Read Resource "
+                "to request a shared-lock snapshot from the server."
+            )
     return jsonify(resp)
 
 
@@ -123,6 +148,12 @@ def api_logout():
     resp = _conn.logout()
     with _state_lock:
         _node["user"] = None
+        _node["version"] = None
+        _node["content"] = ""
+        _node["content_version"] = None
+        _node["content_loaded"] = False
+        _node["content_stale"] = False
+        _node["status_message"] = "Logged out. Login to access the distributed resource."
     return jsonify(resp)
 
 
@@ -131,8 +162,13 @@ def api_read():
     resp = _conn.read()
     if resp.get("status") == protocol.STATUS_OK:
         with _state_lock:
-            _node["version"] = resp.get("version")
+            version = resp.get("version")
+            _node["version"] = version
             _node["content"] = resp.get("content", "")
+            _node["content_version"] = version
+            _node["content_loaded"] = True
+            _node["content_stale"] = False
+            _node["status_message"] = f"Loaded file snapshot v{version} using a shared read lock."
     return jsonify(resp)
 
 
@@ -142,8 +178,16 @@ def api_write():
     resp = _conn.write(data.get("content", ""))
     if resp.get("status") == protocol.STATUS_OK:
         with _state_lock:
-            _node["version"] = resp.get("version")
-            _node["content"] = resp.get("content", "")
+            version = resp.get("version")
+            _node["version"] = version
+            # Do not replace the displayed file after a write. The write response
+            # only confirms the commit; the user must perform an explicit READ
+            # to fetch the latest shared-resource snapshot.
+            if _node["content_loaded"] and version != _node["content_version"]:
+                _node["content_stale"] = True
+            _node["status_message"] = (
+                f"Write committed as v{version}. Press Read Resource to reload the file."
+            )
     return jsonify(resp)
 
 
@@ -185,6 +229,12 @@ DASHBOARD_HTML = """
   .who { font-size:1.05rem; font-weight:700; color:#a5f3fc; }
   .ver { display:inline-block; background:#1e3a5f; color:#7dd3fc; padding:2px 10px; border-radius:10px;
          font-size:0.75rem; font-weight:700; }
+  .snapshot-bar { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-bottom:10px; }
+  .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:0.72rem; font-weight:700; }
+  .badge.fresh { background:#064e3b; color:#6ee7b7; border:1px solid #10b981; }
+  .badge.stale { background:#78350f; color:#fcd34d; border:1px solid #f59e0b; }
+  .badge.empty { background:#334155; color:#cbd5e1; border:1px solid #64748b; }
+  .status-line { color:#94a3b8; font-size:0.84rem; margin:8px 0 10px; }
   textarea { width:100%; min-height:64px; resize:vertical; }
   pre { background:#0b1120; border:1px solid #1e3357; border-radius:8px; padding:12px; margin-top:10px;
         max-height:230px; overflow:auto; font-size:0.8rem; color:#cbd5e1; white-space:pre-wrap; }
@@ -229,24 +279,33 @@ DASHBOARD_HTML = """
       <!-- Pub-sub notification feed -->
       <div class="card">
         <h2>Live Update Notifications (Publish-Subscribe)</h2>
-        <div class="feed" id="feed"><p class="muted">No updates yet. Writes from any node appear here instantly.</p></div>
+        <div class="feed" id="feed"><p class="muted">No updates yet. Writes from any node appear here as notifications.</p></div>
       </div>
 
       <!-- Shared distributed resource -->
       <div class="card full">
-        <h2>Shared Resource &nbsp; <span class="ver" id="ver">v?</span></h2>
-        <div>
-          <button class="btn-read" onclick="readFile()">Read Resource</button>
+        <h2>Shared Resource &nbsp; <span class="ver" id="ver">server v?</span></h2>
+        <div class="snapshot-bar">
+          <button class="btn-read" onclick="readFile()">Read Resource (shared lock)</button>
+          <span class="badge empty" id="snapshot-badge">not loaded</span>
         </div>
-        <textarea id="write-box" placeholder="Text to append, then Write (exclusive lock across all nodes)..."></textarea>
-        <button class="btn-write" onclick="writeFile()">Write Update</button>
-        <pre id="content">(login to load the resource)</pre>
+        <p class="status-line" id="resource-status">Login, then press Read Resource to fetch the file.</p>
+        <textarea id="write-box" placeholder="Text to append, then Write Update (exclusive lock across all nodes)..."></textarea>
+        <button class="btn-write" onclick="writeFile()">Write Update (exclusive lock)</button>
+        <pre id="content">(no local file snapshot loaded)</pre>
       </div>
     </div>
   </div>
 
 <script>
   let loggedIn = false;
+  let readInProgress = false;
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[ch]));
+  }
 
   function login() {
     const [user_id, username] = document.getElementById('user-select').value.split('|');
@@ -260,11 +319,23 @@ DASHBOARD_HTML = """
   }
   function logout() { fetch('/api/logout', {method:'POST'}).then(() => refresh()); }
   function readFile() {
-    document.getElementById('content').textContent = 'Reading (acquiring shared lock)...';
+    readInProgress = true;
+    document.getElementById('content').textContent = 'Reading from server (acquiring shared lock)...';
+    document.getElementById('resource-status').textContent = 'Read request sent. Waiting for shared lock...';
     fetch('/api/read', {method:'POST'}).then(r => r.json()).then(d => {
-      if (d.status === 'OK') document.getElementById('content').textContent = d.content;
-      else document.getElementById('content').textContent = '[error] ' + d.message;
+      readInProgress = false;
+      if (d.status === 'OK') {
+        document.getElementById('content').textContent = d.content;
+        document.getElementById('resource-status').textContent = 'Loaded file snapshot v' + d.version + '.';
+      } else {
+        document.getElementById('content').textContent = '[error] ' + d.message;
+        document.getElementById('resource-status').textContent = 'Read failed.';
+      }
       refresh();
+    }).catch(() => {
+      readInProgress = false;
+      document.getElementById('content').textContent = '[error] Read request failed';
+      document.getElementById('resource-status').textContent = 'Read failed.';
     });
   }
   function writeFile() {
@@ -273,7 +344,11 @@ DASHBOARD_HTML = """
     fetch('/api/write', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({content: box.value})})
       .then(r => r.json()).then(d => {
-        if (d.status === 'OK') { box.value=''; }
+        if (d.status === 'OK') {
+          box.value='';
+          document.getElementById('resource-status').textContent =
+            'Write committed as v' + d.version + '. Press Read Resource to reload the file.';
+        }
         else alert(d.message);
         refresh();
       });
@@ -291,18 +366,32 @@ DASHBOARD_HTML = """
       document.getElementById('logged-in').className = loggedIn ? '' : 'hidden';
       if (loggedIn) document.getElementById('who').textContent = d.user_id + ' - ' + d.username;
 
-      // Resource version + content.
-      document.getElementById('ver').textContent = 'v' + (d.version ?? '?');
-      if (d.content) document.getElementById('content').textContent = d.content;
+      // Server resource version + local snapshot state. The file body is only
+      // updated from the last explicit READ; pub-sub updates only mark it stale.
+      document.getElementById('ver').textContent = 'server v' + (d.version ?? '?');
+      document.getElementById('resource-status').textContent = d.status_message || '';
+      const badge = document.getElementById('snapshot-badge');
+      if (!readInProgress) {
+        if (!d.content_loaded) {
+          badge.textContent = 'not loaded'; badge.className = 'badge empty';
+          document.getElementById('content').textContent = '(no local file snapshot loaded)';
+        } else if (d.content_stale) {
+          badge.textContent = 'cached v' + d.content_version + ' - stale'; badge.className = 'badge stale';
+          document.getElementById('content').textContent = d.content;
+        } else {
+          badge.textContent = 'loaded v' + d.content_version + ' - fresh'; badge.className = 'badge fresh';
+          document.getElementById('content').textContent = d.content;
+        }
+      }
 
       // Publish-subscribe feed (most recent first).
       const feed = document.getElementById('feed');
       if (!d.notifications.length) {
-        feed.innerHTML = '<p class="muted">No updates yet. Writes from any node appear here instantly.</p>';
+        feed.innerHTML = '<p class="muted">No updates yet. Writes from any node appear here as notifications.</p>';
       } else {
         feed.innerHTML = d.notifications.slice().reverse().map(n =>
-          `<div class="note"><div class="meta">v${n.version} &bull; by ${n.updated_by}</div>`+
-          `<div class="body">${n.summary}</div></div>`).join('');
+          `<div class="note"><div class="meta">v${escapeHtml(n.version)} &bull; by ${escapeHtml(n.updated_by)}</div>`+
+          `<div class="body">${escapeHtml(n.summary)}<br><span class="muted">Notification only - press Read Resource to fetch the updated file.</span></div></div>`).join('');
       }
     });
   }

@@ -157,7 +157,9 @@ class DataLayer:
             on_acquired: optional callback invoked once the write lock is held.
 
         Returns:
-            (success, new_content_or_error, new_version).
+            (success, message_or_error, new_version). The full file content is
+            deliberately not returned from WRITE; clients fetch it through an
+            explicit READ so the read operation remains meaningful.
         """
         if not self._rw_lock.acquire_write(timeout=10.0):
             return False, "Timeout acquiring write lock (deadlock avoidance)", self.version
@@ -173,8 +175,6 @@ class DataLayer:
             with self._version_lock:
                 self._version += 1
                 new_version = self._version
-            with open(FILE_PATH, "r", encoding="utf-8") as f:
-                content = f.read()
-            return True, content, new_version
+            return True, "Write committed", new_version
         finally:
             self._rw_lock.release_write()           # always release the lock
