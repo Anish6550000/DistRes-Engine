@@ -1,6 +1,5 @@
 """
 data_layer.py - DistRes Data Layer
-===================================
 
 The scenario mandates a layered architecture that separates the
 application/logic layer from the DATA LAYER. This module IS the data layer: it
@@ -48,7 +47,7 @@ _IO_LATENCY_SECONDS = 2.0
 
 
 class DataLayer:
-    """Owns all persistent state and the lock that keeps it consistent."""
+    # Owns all persistent state and the lock that keeps it consistent.
 
     def __init__(self):
         # The one lock that coordinates read/write access to the shared file.
@@ -63,10 +62,10 @@ class DataLayer:
         self._init_database()
         self._init_file()
 
-    # ----- initialisation ---------------------------------------------------
+    # initialisation
 
     def _init_database(self) -> None:
-        """Create the credentials table (if absent) and seed the engineers."""
+        # Create the credentials table (if absent) and seed the engineers.
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS users ("
@@ -81,21 +80,21 @@ class DataLayer:
         conn.close()
 
     def _init_file(self) -> None:
-        """Ensure the shared resource file exists before any client connects."""
+        # Ensure the shared resource file exists before any client connects.
         if not os.path.exists(FILE_PATH):
             with open(FILE_PATH, "w", encoding="utf-8") as f:
                 f.write("Product Specification Document\n")
                 f.write("==============================\n")
 
-    # ----- authentication (credential database) -----------------------------
+    # authentication (credential database)
 
     def authenticate(self, user_id: str, username: str) -> bool:
-        """Return True iff (user_id, username) matches a seeded credential.
-
-        A fresh connection per call keeps the data layer thread-safe: SQLite
-        connection objects must not be shared across threads, and the server
-        handles every client on its own thread.
-        """
+        # Return True iff (user_id, username) matches a seeded credential.
+        #
+        #         A fresh connection per call keeps the data layer thread-safe: SQLite
+        #         connection objects must not be shared across threads, and the server
+        #         handles every client on its own thread.
+        #
         conn = sqlite3.connect(DB_PATH)
         row = conn.execute(
             "SELECT 1 FROM users WHERE user_id = ? AND username = ?",
@@ -105,7 +104,7 @@ class DataLayer:
         return row is not None
 
     def list_users(self) -> list[tuple[str, str]]:
-        """Return all (user_id, username) pairs - used to populate client UIs."""
+        # Return all (user_id, username) pairs - used to populate client UIs.
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
             "SELECT user_id, username FROM users ORDER BY user_id"
@@ -113,25 +112,25 @@ class DataLayer:
         conn.close()
         return rows
 
-    # ----- shared file access (read-write coordinated) ----------------------
+    # shared file access (read-write coordinated)
 
     @property
     def version(self) -> int:
-        """Current version stamp of the shared resource (thread-safe read)."""
+        # Current version stamp of the shared resource (thread-safe read).
         with self._version_lock:
             return self._version
 
     def read_resource(self, on_acquired=None) -> tuple[bool, str, int]:
-        """Read the shared file under a SHARED lock (concurrent reads allowed).
-
-        Args:
-            on_acquired: optional callback invoked once the read lock is held,
-                         used by the server to update its live status display.
-
-        Returns:
-            (success, content_or_error, version) - success is False only if the
-            read lock could not be acquired within the timeout.
-        """
+        # Read the shared file under a SHARED lock (concurrent reads allowed).
+        #
+        #         Args:
+        #             on_acquired: optional callback invoked once the read lock is held,
+        #                          used by the server to update its live status display.
+        #
+        #         Returns:
+        #             (success, content_or_error, version) - success is False only if the
+        #             read lock could not be acquired within the timeout.
+        #
         if not self._rw_lock.acquire_read(timeout=10.0):
             return False, "Timeout acquiring read lock (deadlock avoidance)", self.version
         try:
@@ -149,18 +148,18 @@ class DataLayer:
 
     def write_resource(self, user_id: str, text: str, on_acquired=None
                         ) -> tuple[bool, str, int]:
-        """Append to the shared file under an EXCLUSIVE lock (one writer only).
-
-        Args:
-            user_id:     the engineer performing the write (recorded in the file).
-            text:        the line to append.
-            on_acquired: optional callback invoked once the write lock is held.
-
-        Returns:
-            (success, message_or_error, new_version). The full file content is
-            deliberately not returned from WRITE; clients fetch it through an
-            explicit READ so the read operation remains meaningful.
-        """
+        # Append to the shared file under an EXCLUSIVE lock (one writer only).
+        #
+        #         Args:
+        #             user_id:     the engineer performing the write (recorded in the file).
+        #             text:        the line to append.
+        #             on_acquired: optional callback invoked once the write lock is held.
+        #
+        #         Returns:
+        #             (success, message_or_error, new_version). The full file content is
+        #             deliberately not returned from WRITE; clients fetch it through an
+        #             explicit READ so the read operation remains meaningful.
+        #
         if not self._rw_lock.acquire_write(timeout=10.0):
             return False, "Timeout acquiring write lock (deadlock avoidance)", self.version
         try:

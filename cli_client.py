@@ -1,6 +1,5 @@
 """
 cli_client.py - DistRes Command-Line Client Node
-=================================================
 
 A minimal terminal CLIENT NODE. It shares the exact same fault-tolerant
 networking core (connection.ServerConnection) as the web client node, which

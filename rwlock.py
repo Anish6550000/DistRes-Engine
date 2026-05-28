@@ -1,6 +1,5 @@
 """
 rwlock.py - Readers-Writer Lock for the Data Layer
-===================================================
 
 DistRes serialises every client's file access through ONE server-side
 readers-writer lock. This is the synchronisation primitive that satisfies the
@@ -11,7 +10,6 @@ scenario requirement:
      ensures consistency across nodes."
 
 Design points
--------------
   * Multiple readers may hold the lock simultaneously (shared access).
   * A writer holds the lock exclusively (no readers, no other writer).
   * The lock is WRITER-PREFERRING: once a writer is waiting, new readers are
@@ -32,7 +30,7 @@ import time
 
 
 class ReadWriteLock:
-    """A timeout-bounded, writer-preferring readers-writer lock."""
+    # A timeout-bounded, writer-preferring readers-writer lock.
 
     def __init__(self):
         # A single mutex protects all of the counters below. Both condition
@@ -48,11 +46,11 @@ class ReadWriteLock:
         self._waiting_writers = 0   # writers blocked waiting to enter
 
     def acquire_read(self, timeout: float = 10.0) -> bool:
-        """Acquire shared (read) access. Returns True on success, False on timeout.
-
-        A reader must wait while a writer is active OR while any writer is
-        queued; the latter condition is what makes the lock writer-preferring.
-        """
+        # Acquire shared (read) access. Returns True on success, False on timeout.
+        #
+        #         A reader must wait while a writer is active OR while any writer is
+        #         queued; the latter condition is what makes the lock writer-preferring.
+        #
         deadline = time.time() + timeout
         with self._lock:
             # Block while a writer holds, or is waiting for, the lock.
@@ -65,7 +63,7 @@ class ReadWriteLock:
             return True
 
     def release_read(self) -> None:
-        """Release shared access; wake a waiting writer if we were the last reader."""
+        # Release shared access; wake a waiting writer if we were the last reader.
         with self._lock:
             self._active_readers -= 1
             # Only when the final reader leaves can a writer safely proceed.
@@ -73,11 +71,11 @@ class ReadWriteLock:
                 self._writers_ok.notify()
 
     def acquire_write(self, timeout: float = 10.0) -> bool:
-        """Acquire exclusive (write) access. Returns True on success, False on timeout.
-
-        Registering as a *waiting* writer up-front is what blocks new readers and
-        guarantees the writer is not starved by a steady flow of readers.
-        """
+        # Acquire exclusive (write) access. Returns True on success, False on timeout.
+        #
+        #         Registering as a *waiting* writer up-front is what blocks new readers and
+        #         guarantees the writer is not starved by a steady flow of readers.
+        #
         deadline = time.time() + timeout
         with self._lock:
             self._waiting_writers += 1                # announce intent -> blocks readers
@@ -95,7 +93,7 @@ class ReadWriteLock:
                 self._waiting_writers -= 1
 
     def release_write(self) -> None:
-        """Release exclusive access and wake every waiting reader and the next writer."""
+        # Release exclusive access and wake every waiting reader and the next writer.
         with self._lock:
             self._active_writers -= 1
             # A finished write may unblock a batch of readers AND a queued writer;

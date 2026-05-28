@@ -1,6 +1,5 @@
 """
 server.py - DistRes Server Node (Application / Logic Layer)
-===========================================================
 
 This is the authoritative SERVER NODE of the distributed system. Exactly one of
 these runs; many client nodes connect to it over TCP. It implements the
@@ -9,7 +8,6 @@ boundary, while delegating all persistence to data_layer.DataLayer and all
 notification fan-out to pubsub.PubSubBroker.
 
 Responsibilities
-----------------
   * Accept TCP connections and service each client on a dedicated thread, so
     reads from different nodes can genuinely proceed concurrently.
   * Coordinate access: authenticate logins, admit at most N concurrent sessions
@@ -38,7 +36,7 @@ MAX_SESSIONS = 5
 
 
 class ClientHandler:
-    """Handles the full lifecycle of ONE connected client node, on its own thread."""
+    # Handles the full lifecycle of ONE connected client node, on its own thread.
 
     def __init__(self, server: "DistResServer", sock: socket.socket, address):
         self._server = server
@@ -52,29 +50,29 @@ class ClientHandler:
         self._user_id: str | None = None            # set once the client logs in
         self._holds_session = False                 # True while a semaphore slot is held
 
-    # ----- outbound -------------------------------------------------------
+    # outbound
 
     def _send(self, message: dict) -> None:
-        """Thread-safe send of a single framed message to this client."""
+        # Thread-safe send of a single framed message to this client.
         with self._send_lock:
             protocol.send_message(self._sock, message)
 
     def deliver_event(self, event: dict) -> None:
-        """Publish-subscribe delivery callback registered with the broker.
-
-        The broker calls this (from whichever thread committed a write) to push
-        an unsolicited EVENT down THIS client's socket.
-        """
+        # Publish-subscribe delivery callback registered with the broker.
+        #
+        #         The broker calls this (from whichever thread committed a write) to push
+        #         an unsolicited EVENT down THIS client's socket.
+        #
         self._send({
             "type": protocol.TYPE_EVENT,
             "topic": event["topic"],
             "payload": event["payload"],
         })
 
-    # ----- main loop ------------------------------------------------------
+    # main loop
 
     def run(self) -> None:
-        """Read and service requests until the client disconnects or errors."""
+        # Read and service requests until the client disconnects or errors.
         self._server.log(f"CONNECT   client {self._address[0]}:{self._address[1]}")
         try:
             while True:
@@ -90,7 +88,7 @@ class ClientHandler:
             self._cleanup()
 
     def _dispatch(self, message: dict) -> None:
-        """Route one REQUEST to the matching handler based on its 'action'."""
+        # Route one REQUEST to the matching handler based on its 'action'.
         if message.get("type") != protocol.TYPE_REQUEST:
             return                                  # ignore anything that is not a request
         action = message.get("action")
@@ -110,7 +108,7 @@ class ClientHandler:
         handler(request_id, message)
 
     def _respond(self, request_id, status, **fields) -> None:
-        """Send a RESPONSE that echoes the request id for client-side correlation."""
+        # Send a RESPONSE that echoes the request id for client-side correlation.
         self._send({
             "type": protocol.TYPE_RESPONSE,
             "id": request_id,
@@ -118,10 +116,10 @@ class ClientHandler:
             **fields,
         })
 
-    # ----- individual actions --------------------------------------------
+    # individual actions
 
     def _handle_login(self, request_id, message) -> None:
-        """Authenticate, admit a session (admission control), and subscribe."""
+        # Authenticate, admit a session (admission control), and subscribe.
         user_id = message.get("user_id")
         username = message.get("username")
 
@@ -166,7 +164,7 @@ class ClientHandler:
                       version=self._server.data.version)
 
     def _require_session(self, request_id) -> bool:
-        """Guard: every resource action requires an authenticated session."""
+        # Guard: every resource action requires an authenticated session.
         if self._user_id is None:
             self._respond(request_id, protocol.STATUS_ERROR,
                           message="Not logged in")
@@ -174,7 +172,7 @@ class ClientHandler:
         return True
 
     def _handle_read(self, request_id, message) -> None:
-        """Shared read of the distributed resource (many readers may overlap)."""
+        # Shared read of the distributed resource (many readers may overlap).
         if not self._require_session(request_id):
             return
 
@@ -191,7 +189,7 @@ class ClientHandler:
             self._respond(request_id, protocol.STATUS_ERROR, message=content)
 
     def _handle_write(self, request_id, message) -> None:
-        """Exclusive write, then PUBLISH the update to every subscriber."""
+        # Exclusive write, then PUBLISH the update to every subscriber.
         if not self._require_session(request_id):
             return
         text = message.get("content", "")
@@ -213,7 +211,7 @@ class ClientHandler:
         # file body; subscribers must send READ to obtain a fresh snapshot.
         self._respond(request_id, protocol.STATUS_OK,
                       version=version, message=result_message)
-        # ----- PUBLISH step of publish-subscribe -----
+        # PUBLISH step of publish-subscribe
         self._server.broker.publish(protocol.TOPIC_RESOURCE_UPDATE, {
             "version": version,
             "updated_by": self._user_id,
@@ -221,18 +219,18 @@ class ClientHandler:
         })
 
     def _handle_logout(self, request_id, message) -> None:
-        """Close the session cleanly at the client's request."""
+        # Close the session cleanly at the client's request.
         self._respond(request_id, protocol.STATUS_OK, message="Logged out")
         self._release_session()
 
     def _handle_ping(self, request_id, message) -> None:
-        """Reply to a keep-alive heartbeat (lets clients detect a dead server)."""
+        # Reply to a keep-alive heartbeat (lets clients detect a dead server).
         self._respond(request_id, protocol.STATUS_OK, message="PONG")
 
-    # ----- teardown -------------------------------------------------------
+    # teardown
 
     def _release_session(self) -> None:
-        """Drop this client's subscription and free its session slot (idempotent)."""
+        # Drop this client's subscription and free its session slot (idempotent).
         if self._user_id is not None:
             self._server.broker.unsubscribe(self._user_id)
             self._server.unregister_session(self._user_id)
@@ -243,12 +241,12 @@ class ClientHandler:
             self._holds_session = False
 
     def _cleanup(self) -> None:
-        """Always-run cleanup on disconnect - this is the server-side fault tolerance.
-
-        Whether the client logged out politely or its connection died, we release
-        the session slot and subscription so the server self-heals and never
-        leaks capacity to a vanished node.
-        """
+        # Always-run cleanup on disconnect - this is the server-side fault tolerance.
+        #
+        #         Whether the client logged out politely or its connection died, we release
+        #         the session slot and subscription so the server self-heals and never
+        #         leaks capacity to a vanished node.
+        #
         self._release_session()
         try:
             self._sock.close()
@@ -258,7 +256,7 @@ class ClientHandler:
 
 
 class DistResServer:
-    """The server node: owns the listening socket, data layer, broker and sessions."""
+    # The server node: owns the listening socket, data layer, broker and sessions.
 
     def __init__(self, host: str, port: int):
         self._host = host
@@ -275,7 +273,7 @@ class DistResServer:
         self._writer: str | None = None             # the user currently writing
         self._log_lines: list[str] = []             # recent console log lines
 
-    # ----- session registry helpers --------------------------------------
+    # session registry helpers
 
     def register_session(self, user_id, username):
         with self._status_lock:
@@ -305,20 +303,20 @@ class DistResServer:
             self._writer = user_id if active else (
                 None if self._writer == user_id else self._writer)
 
-    # ----- console logging -------------------------------------------------
+    # console logging
 
     def log(self, line: str) -> None:
-        """Timestamp and print a console line, keeping the last 200 in memory."""
+        # Timestamp and print a console line, keeping the last 200 in memory.
         stamped = f"[{time.strftime('%H:%M:%S')}] {line}"
         with self._status_lock:
             self._log_lines.append(stamped)
             self._log_lines = self._log_lines[-200:]
         print(stamped, flush=True)
 
-    # ----- main accept loop ------------------------------------------------
+    # main accept loop
 
     def serve_forever(self) -> None:
-        """Bind, listen, and spawn a handler thread for each incoming client."""
+        # Bind, listen, and spawn a handler thread for each incoming client.
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # SO_REUSEADDR lets the server restart immediately after a crash without
         # waiting for the OS to release the port - a small but real reliability win.

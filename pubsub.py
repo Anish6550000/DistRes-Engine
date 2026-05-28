@@ -1,6 +1,5 @@
 """
 pubsub.py - Publish-Subscribe Broker
-=====================================
 
 This module implements the publish-subscribe mechanism required by the scenario:
 
@@ -8,7 +7,6 @@ This module implements the publish-subscribe mechanism required by the scenario:
      all active clients."
 
 Roles in the pattern
----------------------
   * PUBLISHER  : the server's application layer, which calls publish() once a
                  write has been committed to the data layer.
   * BROKER     : this class. It holds the registry of current subscribers and
@@ -28,7 +26,7 @@ import threading
 
 
 class PubSubBroker:
-    """A thread-safe, topic-based fan-out broker."""
+    # A thread-safe, topic-based fan-out broker.
 
     def __init__(self, logger=None):
         # Maps subscriber_id -> delivery callback. One entry per active client.
@@ -40,28 +38,28 @@ class PubSubBroker:
         self._logger = logger
 
     def subscribe(self, subscriber_id: str, deliver) -> None:
-        """Register a subscriber and the callback used to deliver events to it."""
+        # Register a subscriber and the callback used to deliver events to it.
         with self._lock:
             self._subscribers[subscriber_id] = deliver
 
     def unsubscribe(self, subscriber_id: str) -> None:
-        """Remove a subscriber (on logout or disconnect). Safe if absent."""
+        # Remove a subscriber (on logout or disconnect). Safe if absent.
         with self._lock:
             self._subscribers.pop(subscriber_id, None)
 
     def subscriber_count(self) -> int:
-        """Number of clients currently subscribed - shown on the server console."""
+        # Number of clients currently subscribed - shown on the server console.
         with self._lock:
             return len(self._subscribers)
 
     def publish(self, topic: str, payload: dict) -> int:
-        """Deliver one event to EVERY current subscriber. Returns the fan-out count.
-
-        Fault isolation: each subscriber is delivered to inside its own
-        try/except. A single dead or slow client (e.g. one whose socket has just
-        failed) therefore cannot break the broadcast for everyone else - a key
-        reliability property of the publish-subscribe design.
-        """
+        # Deliver one event to EVERY current subscriber. Returns the fan-out count.
+        #
+        #         Fault isolation: each subscriber is delivered to inside its own
+        #         try/except. A single dead or slow client (e.g. one whose socket has just
+        #         failed) therefore cannot break the broadcast for everyone else - a key
+        #         reliability property of the publish-subscribe design.
+        #
         # Snapshot the registry under the lock, then deliver OUTSIDE the lock so
         # a slow delivery cannot block other threads from (un)subscribing.
         with self._lock:

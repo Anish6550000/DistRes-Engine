@@ -1,6 +1,5 @@
 """
 connection.py - Fault-Tolerant Client Connection Core
-======================================================
 
 This module is the networking heart of every CLIENT NODE. It is deliberately
 separated from any user interface so that the same, tested connection logic
@@ -49,7 +48,7 @@ _HEARTBEAT_INTERVAL = 5.0
 
 
 class _PendingRequest:
-    """A response slot a caller blocks on until the matching RESPONSE arrives."""
+    # A response slot a caller blocks on until the matching RESPONSE arrives.
 
     def __init__(self):
         self.event = threading.Event()  # set when the response lands
@@ -57,7 +56,7 @@ class _PendingRequest:
 
 
 class ServerConnection:
-    """A resilient, self-reconnecting message channel to the DistRes server."""
+    # A resilient, self-reconnecting message channel to the DistRes server.
 
     def __init__(self, host: str, port: int,
                  on_event=None, on_state_change=None):
@@ -84,46 +83,46 @@ class ServerConnection:
         self._running = True
         self._listener_thread: threading.Thread | None = None
 
-    # ----- public API ------------------------------------------------------
+    # public API
 
     @property
     def state(self) -> str:
         return self._state
 
     def start(self) -> None:
-        """Open the connection and launch the background listener + heartbeat."""
+        # Open the connection and launch the background listener + heartbeat.
         self._connect_with_retry()
         self._listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
         self._listener_thread.start()
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
     def login(self, user_id: str, username: str) -> dict:
-        """Authenticate and open a session, remembering creds for auto re-login."""
+        # Authenticate and open a session, remembering creds for auto re-login.
         self._credentials = (user_id, username)
         return self.request(protocol.ACTION_LOGIN,
                             user_id=user_id, username=username)
 
     def logout(self) -> dict:
-        """Close the session and stop attempting to re-login on reconnect."""
+        # Close the session and stop attempting to re-login on reconnect.
         response = self.request(protocol.ACTION_LOGOUT)
         self._credentials = None
         return response
 
     def read(self) -> dict:
-        """Request a shared read of the distributed resource."""
+        # Request a shared read of the distributed resource.
         return self.request(protocol.ACTION_READ)
 
     def write(self, content: str) -> dict:
-        """Request an exclusive write to the distributed resource."""
+        # Request an exclusive write to the distributed resource.
         return self.request(protocol.ACTION_WRITE, content=content)
 
     def request(self, action: str, **params) -> dict:
-        """Send a REQUEST and block until its RESPONSE arrives (or time out).
-
-        This is the synchronous façade over the asynchronous socket: it parks the
-        caller on an Event that the listener thread sets when the correlated
-        response is received.
-        """
+        # Send a REQUEST and block until its RESPONSE arrives (or time out).
+        #
+        #         This is the synchronous façade over the asynchronous socket: it parks the
+        #         caller on an Event that the listener thread sets when the correlated
+        #         response is received.
+        #
         request_id = next(self._id_counter)
         pending = _PendingRequest()
         with self._pending_lock:
@@ -149,7 +148,7 @@ class ServerConnection:
         return pending.response
 
     def close(self) -> None:
-        """Permanently stop the connection (no further reconnect attempts)."""
+        # Permanently stop the connection (no further reconnect attempts).
         self._running = False
         self._set_state(STATE_DISCONNECTED)
         if self._sock:
@@ -158,10 +157,10 @@ class ServerConnection:
             except OSError:
                 pass
 
-    # ----- connection management ------------------------------------------
+    # connection management
 
     def _connect_once(self) -> bool:
-        """Attempt a single TCP connection. Returns True on success."""
+        # Attempt a single TCP connection. Returns True on success.
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((self._host, self._port))
@@ -173,7 +172,7 @@ class ServerConnection:
             return False
 
     def _connect_with_retry(self) -> None:
-        """Block until connected, backing off exponentially between attempts."""
+        # Block until connected, backing off exponentially between attempts.
         backoff = _BACKOFF_START
         while self._running and not self._connect_once():
             self._set_state(STATE_RECONNECTING)
@@ -181,13 +180,13 @@ class ServerConnection:
             backoff = min(backoff * 2, _BACKOFF_MAX)  # exponential backoff, capped
 
     def _reconnect(self) -> None:
-        """Recover from a dropped connection and restore the session.
-
-        This is the core fault-tolerance routine. After re-establishing the TCP
-        link it transparently re-LOGINs (which also re-subscribes this node to
-        publish-subscribe updates), so from the user's perspective the outage
-        simply heals itself.
-        """
+        # Recover from a dropped connection and restore the session.
+        #
+        #         This is the core fault-tolerance routine. After re-establishing the TCP
+        #         link it transparently re-LOGINs (which also re-subscribes this node to
+        #         publish-subscribe updates), so from the user's perspective the outage
+        #         simply heals itself.
+        #
         if not self._running:
             return
         self._set_state(STATE_RECONNECTING)
@@ -206,16 +205,16 @@ class ServerConnection:
             self.request(protocol.ACTION_LOGIN, user_id=user_id, username=username)
 
     def _raw_send(self, message: dict) -> None:
-        """Low-level, mutually-exclusive write of one message to the socket."""
+        # Low-level, mutually-exclusive write of one message to the socket.
         with self._send_lock:
             if self._sock is None:
                 raise OSError("not connected")
             protocol.send_message(self._sock, message)
 
-    # ----- background threads ---------------------------------------------
+    # background threads
 
     def _listen_loop(self) -> None:
-        """Continuously read the socket, demultiplexing RESPONSEs from EVENTs."""
+        # Continuously read the socket, demultiplexing RESPONSEs from EVENTs.
         while self._running:
             try:
                 message = self._reader.read_message()
@@ -229,7 +228,7 @@ class ServerConnection:
             self._handle_incoming(message)
 
     def _handle_incoming(self, message: dict) -> None:
-        """Decide whether an inbound message is a reply or a pub-sub event."""
+        # Decide whether an inbound message is a reply or a pub-sub event.
         msg_type = message.get("type")
         if msg_type == protocol.TYPE_RESPONSE:
             # Match the response to the waiting caller via its id and wake them.
@@ -246,7 +245,7 @@ class ServerConnection:
                 self._on_event(message)
 
     def _heartbeat_loop(self) -> None:
-        """Periodically PING so a silently dead server is detected promptly."""
+        # Periodically PING so a silently dead server is detected promptly.
         while self._running:
             time.sleep(_HEARTBEAT_INTERVAL)
             if self._state == STATE_CONNECTED:
@@ -259,10 +258,10 @@ class ServerConnection:
                 except OSError:
                     pass
 
-    # ----- state notification ---------------------------------------------
+    # state notification
 
     def _set_state(self, state: str) -> None:
-        """Update the connection state and notify the UI if it changed."""
+        # Update the connection state and notify the UI if it changed.
         if state != self._state:
             self._state = state
             if self._on_state_change is not None:

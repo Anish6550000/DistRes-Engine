@@ -1,6 +1,5 @@
 """
 client_node.py - DistRes Web Client Node
-=========================================
 
 A CLIENT NODE presented as a polished web dashboard. Each invocation is an
 independent node (its own OS process, its own port) that maintains ONE
@@ -39,12 +38,10 @@ USERS = [("ENG001", "Alice"), ("ENG002", "Bob"), ("ENG003", "Charlie"),
 
 app = Flask(__name__)
 
-# --------------------------------------------------------------------------
 # Local, UI-facing node state. Everything the browser shows is derived from
 # this structure, which is mutated both by user actions (request threads) and
 # by the background socket listener (pub-sub events / state changes), so it is
 # guarded by a lock.
-# --------------------------------------------------------------------------
 _state_lock = threading.Lock()
 _node = {
     "name": "Client Node",
@@ -62,13 +59,13 @@ _conn: ServerConnection | None = None
 
 
 def _on_event(message):
-    """Publish-subscribe subscriber callback (runs on the listener thread).
-
-    The update event is deliberately metadata-only. It tells the node that the
-    server-side file has changed, but it does NOT replace the local file view.
-    This keeps the READ operation meaningful: a client must explicitly press
-    Read Resource to acquire the shared lock and fetch a fresh file snapshot.
-    """
+    # Publish-subscribe subscriber callback (runs on the listener thread).
+    #
+    #     The update event is deliberately metadata-only. It tells the node that the
+    #     server-side file has changed, but it does NOT replace the local file view.
+    #     This keeps the READ operation meaningful: a client must explicitly press
+    #     Read Resource to acquire the shared lock and fetch a fresh file snapshot.
+    #
     payload = message.get("payload", {})
     new_version = payload.get("version")
     with _state_lock:
@@ -91,14 +88,12 @@ def _on_event(message):
 
 
 def _on_state(state):
-    """Connection-state callback: surfaces reconnection activity to the UI."""
+    # Connection-state callback: surfaces reconnection activity to the UI.
     with _state_lock:
         _node["connection"] = state
 
 
-# --------------------------------------------------------------------------
 # HTTP routes - thin adapters between the browser and the socket connection.
-# --------------------------------------------------------------------------
 @app.route("/")
 def index():
     return render_template_string(DASHBOARD_HTML, node_name=_node["name"], users=USERS)
@@ -106,7 +101,7 @@ def index():
 
 @app.route("/api/state")
 def api_state():
-    """Polled once per second by the browser to refresh the live view."""
+    # Polled once per second by the browser to refresh the live view.
     with _state_lock:
         user = _node["user"]
         return jsonify({
@@ -191,9 +186,7 @@ def api_write():
     return jsonify(resp)
 
 
-# --------------------------------------------------------------------------
 # Dashboard template (presentation layer).
-# --------------------------------------------------------------------------
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
