@@ -323,12 +323,18 @@ class DistResServer:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind((self._host, self._port))
         listener.listen()
+        # A short timeout so accept() wakes up periodically; without it a blocking
+        # accept() can swallow Ctrl-C until the next connection arrives.
+        listener.settimeout(1.0)
         self.log(f"DistRes server listening on {self._host}:{self._port} "
                  f"(max {MAX_SESSIONS} sessions)")
 
         try:
             while True:
-                client_sock, address = listener.accept()
+                try:
+                    client_sock, address = listener.accept()
+                except socket.timeout:
+                    continue                       # no client yet; loop and re-check for Ctrl-C
                 handler = ClientHandler(self, client_sock, address)
                 # daemon=True so the threads do not block interpreter shutdown.
                 threading.Thread(target=handler.run, daemon=True).start()
@@ -336,7 +342,6 @@ class DistResServer:
             self.log("Server shutting down (Ctrl-C)")
         finally:
             listener.close()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DistRes server node")
