@@ -1,13 +1,13 @@
-# DistRes — Distributed Resource Access and Synchronisation Engine
+# DistRes - Distributed Resource Access and Synchronisation Engine
 
-**6CM604 – Concurrency and Communication | Course Work 2 (Distributed Systems)**
+**6CM604 - Concurrency and Communication | Course Work 2 (Distributed Systems)**
 Student ID: 100716820
 
 DistRes is the distributed (v2) follow-on to the ConRes concurrent engine from
 Course Work 1. Several **client nodes** connect over TCP to a single
 **server node** and share safe, coordinated read/write access to a credential
 database and a shared specification file. Every write sends a metadata-only
-notification to all connected clients through a publish–subscribe mechanism, and
+notification to all connected clients through a publish-subscribe mechanism, and
 clients recover on their own if the connection drops.
 
 ## Architecture at a glance
@@ -25,9 +25,9 @@ between them is a small newline-framed JSON protocol carried over TCP sockets.
 
 | Scenario requirement | Where it lives |
 |---|---|
-| Distributed client–server communication | `protocol.py`, `connection.py`, `server.py` (raw TCP sockets) |
+| Distributed client-server communication | `protocol.py`, `connection.py`, `server.py` (raw TCP sockets) |
 | Many concurrent readers, one exclusive writer | `rwlock.py` (writer-preferring, timeout-bounded) |
-| Publish–subscribe notification of writes | `pubsub.py` + the publish step in `server.py` |
+| Publish-subscribe notification of writes | `pubsub.py` + the publish step in `server.py` |
 | Layered architecture (logic vs data) | logic = `server.py`/`pubsub.py`; data = `data_layer.py`/`rwlock.py` |
 | Distributed fault tolerance (retries, reconnection) | `connection.py` (auto-reconnect, exponential backoff, re-login) |
 
@@ -39,7 +39,7 @@ distres/
 ├── client_node.py        # Web client node (Flask dashboard)
 ├── cli_client.py         # Terminal client node (handy for extra demo nodes)
 ├── connection.py         # Fault-tolerant client socket core (framing, correlation, reconnect)
-├── pubsub.py             # Publish–subscribe broker (subscriber registry + fan-out)
+├── pubsub.py             # Publish-subscribe broker (subscriber registry + fan-out)
 ├── data_layer.py         # Data layer: SQLite credentials + shared file, behind the RW lock
 ├── rwlock.py             # Writer-preferring readers-writer lock with deadlock-avoidance timeout
 ├── protocol.py           # Shared wire protocol used by both client and server
@@ -64,7 +64,7 @@ python client_node.py --port 5003 --name "Node C"
 
 Then open `http://127.0.0.1:5001`, `:5002`, `:5003` in separate browser windows.
 Log in as different engineers, press **Read Resource** to fetch a locked file
-snapshot, then write from one node. Other nodes receive a publish–subscribe
+snapshot, then write from one node. Other nodes receive a publish-subscribe
 notification immediately, but their file panel stays as a cached snapshot until
 they press **Read Resource** again. This makes the READ request visible rather
 than hiding it behind automatic UI refresh.
@@ -89,13 +89,13 @@ python cli_client.py ENG004 Diana       # commands: read | write <text> | logout
 - **Communication.** TCP gives a byte stream, so `protocol.py` frames each
   message as one line of JSON. `connection.py` runs a background listener that
   splits replies (matched to a request by a unique id) from unsolicited
-  publish–subscribe events.
+  publish-subscribe events.
 - **Coordination.** The server handles each client on its own thread. File
   access goes through one `ReadWriteLock`: many readers can hold it at once, a
   writer holds it exclusively, and the lock prefers writers so a steady stream of
   reads can't starve an update. Every acquire is timeout-bounded for
   deadlock avoidance.
-- **Publish–subscribe.** After a write commits, the server calls
+- **Publish-subscribe.** After a write commits, the server calls
   `broker.publish(...)`, which fans a metadata-only event out to every subscribed
   client. The event marks cached file views as stale; clients then issue an
   explicit READ when they want the updated file body. A failed delivery only
@@ -109,5 +109,5 @@ python cli_client.py ENG004 Diana       # commands: read | write <text> | logout
 ConRes ran everything in one process with threads as "users". DistRes keeps the
 same synchronisation ideas (counting semaphore for admission, readers-writer lock
 for the file) but moves the users onto separate client nodes that talk to a
-server over the network — which is where the distributed concerns (framing,
+server over the network - which is where the distributed concerns (framing,
 correlation, pub-sub, reconnection) come in.

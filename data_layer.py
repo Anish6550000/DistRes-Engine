@@ -89,12 +89,10 @@ class DataLayer:
     # authentication (credential database)
 
     def authenticate(self, user_id: str, username: str) -> bool:
-        # Return True iff (user_id, username) matches a seeded credential.
-        #
-        #         A fresh connection per call keeps the data layer thread-safe: SQLite
-        #         connection objects must not be shared across threads, and the server
-        #         handles every client on its own thread.
-        #
+        # Return True if (user_id, username) matches a seeded credential. A fresh
+        # connection per call keeps the data layer thread-safe: SQLite connection
+        # objects must not be shared across threads, and the server handles every
+        # client on its own thread.
         conn = sqlite3.connect(DB_PATH)
         row = conn.execute(
             "SELECT 1 FROM users WHERE user_id = ? AND username = ?",
@@ -122,15 +120,10 @@ class DataLayer:
 
     def read_resource(self, on_acquired=None) -> tuple[bool, str, int]:
         # Read the shared file under a SHARED lock (concurrent reads allowed).
-        #
-        #         Args:
-        #             on_acquired: optional callback invoked once the read lock is held,
-        #                          used by the server to update its live status display.
-        #
-        #         Returns:
-        #             (success, content_or_error, version) - success is False only if the
-        #             read lock could not be acquired within the timeout.
-        #
+        # on_acquired is an optional callback run once the read lock is held,
+        # used by the server to update its live status display. Returns
+        # (success, content_or_error, version); success is False only if the
+        # read lock could not be acquired within the timeout.
         if not self._rw_lock.acquire_read(timeout=10.0):
             return False, "Timeout acquiring read lock (deadlock avoidance)", self.version
         try:
@@ -149,17 +142,12 @@ class DataLayer:
     def write_resource(self, user_id: str, text: str, on_acquired=None
                         ) -> tuple[bool, str, int]:
         # Append to the shared file under an EXCLUSIVE lock (one writer only).
-        #
-        #         Args:
-        #             user_id:     the engineer performing the write (recorded in the file).
-        #             text:        the line to append.
-        #             on_acquired: optional callback invoked once the write lock is held.
-        #
-        #         Returns:
-        #             (success, message_or_error, new_version). The full file content is
-        #             deliberately not returned from WRITE; clients fetch it through an
-        #             explicit READ so the read operation remains meaningful.
-        #
+        # user_id is the engineer performing the write (recorded in the file),
+        # text is the line to append, and on_acquired is an optional callback run
+        # once the write lock is held. Returns (success, message_or_error,
+        # new_version). The full file content is deliberately not returned from
+        # WRITE; clients fetch it through an explicit READ so the read stays
+        # meaningful.
         if not self._rw_lock.acquire_write(timeout=10.0):
             return False, "Timeout acquiring write lock (deadlock avoidance)", self.version
         try:
@@ -169,8 +157,8 @@ class DataLayer:
             stamp = time.strftime("%Y-%m-%d %H:%M:%S")
             with open(FILE_PATH, "a", encoding="utf-8") as f:
                 f.write(f"\n[{stamp}] {user_id}: {text}")
-            # Bump the version stamp; this happens while we still hold the
-            # exclusive lock, so no reader can observe a half-updated file.
+            # Bump the version stamp while still holding the exclusive lock, so
+            # no reader can observe a half-updated file.
             with self._version_lock:
                 self._version += 1
                 new_version = self._version

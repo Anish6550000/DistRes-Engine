@@ -58,11 +58,9 @@ class ClientHandler:
             protocol.send_message(self._sock, message)
 
     def deliver_event(self, event: dict) -> None:
-        # Publish-subscribe delivery callback registered with the broker.
-        #
-        #         The broker calls this (from whichever thread committed a write) to push
-        #         an unsolicited EVENT down THIS client's socket.
-        #
+        # Publish-subscribe delivery callback registered with the broker. The
+        # broker calls this (from whichever thread committed a write) to push an
+        # unsolicited EVENT down this client's socket.
         self._send({
             "type": protocol.TYPE_EVENT,
             "topic": event["topic"],
@@ -81,8 +79,8 @@ class ClientHandler:
                     break
                 self._dispatch(message)
         except (ConnectionError, OSError):
-            # Abrupt drop (client crash, network failure). Not an error on our
-            # side - just fall through to graceful cleanup below.
+            # Abrupt drop (client crash, network failure). Not a server-side
+            # error - fall through to graceful cleanup below.
             pass
         finally:
             self._cleanup()
@@ -136,14 +134,14 @@ class ClientHandler:
             return
 
         # 3) Distributed admission control: try to take one of the N session
-        #    slots WITHOUT blocking. If the server is at capacity we say so
+        #    slots WITHOUT blocking. If the server is at capacity, reject
         #    immediately rather than stalling the client.
         if not self._server.sessions.acquire(blocking=False):
             self._respond(request_id, protocol.STATUS_ERROR,
                           message=f"Server at capacity ({MAX_SESSIONS} sessions)")
             return
 
-        # The slot is ours: record the session and subscribe to update events.
+        # Slot acquired: record the session and subscribe to update events.
         self._holds_session = True
         self._user_id = user_id
         self._server.register_session(user_id, username)
@@ -241,12 +239,10 @@ class ClientHandler:
             self._holds_session = False
 
     def _cleanup(self) -> None:
-        # Always-run cleanup on disconnect - this is the server-side fault tolerance.
-        #
-        #         Whether the client logged out politely or its connection died, we release
-        #         the session slot and subscription so the server self-heals and never
-        #         leaks capacity to a vanished node.
-        #
+        # Always-run cleanup on disconnect - this is the server-side fault
+        # tolerance. Whether the client logged out politely or its connection
+        # died, this releases the session slot and subscription so the server
+        # self-heals and never leaks capacity to a vanished node.
         self._release_session()
         try:
             self._sock.close()

@@ -118,11 +118,9 @@ class ServerConnection:
 
     def request(self, action: str, **params) -> dict:
         # Send a REQUEST and block until its RESPONSE arrives (or time out).
-        #
-        #         This is the synchronous façade over the asynchronous socket: it parks the
-        #         caller on an Event that the listener thread sets when the correlated
-        #         response is received.
-        #
+        # This is the synchronous front to the asynchronous socket: it parks the
+        # caller on an Event that the listener thread sets once the correlated
+        # response is received.
         request_id = next(self._id_counter)
         pending = _PendingRequest()
         with self._pending_lock:
@@ -133,14 +131,14 @@ class ServerConnection:
         try:
             self._raw_send(message)
         except OSError:
-            # The socket was down when we tried to send. Surface a clean error;
-            # the listener/reconnect machinery will restore the link shortly.
+            # The socket was down at send time. Return a clean error; the
+            # listener/reconnect machinery will restore the link shortly.
             with self._pending_lock:
                 self._pending.pop(request_id, None)
             return {"status": protocol.STATUS_ERROR,
                     "message": "Connection unavailable - retrying in background"}
 
-        # Wait for the listener to deliver our response.
+        # Wait for the listener to deliver the matching response.
         if not pending.event.wait(timeout=_REQUEST_TIMEOUT):
             with self._pending_lock:
                 self._pending.pop(request_id, None)
@@ -180,13 +178,10 @@ class ServerConnection:
             backoff = min(backoff * 2, _BACKOFF_MAX)  # exponential backoff, capped
 
     def _reconnect(self) -> None:
-        # Recover from a dropped connection and restore the session.
-        #
-        #         This is the core fault-tolerance routine. After re-establishing the TCP
-        #         link it transparently re-LOGINs (which also re-subscribes this node to
-        #         publish-subscribe updates), so from the user's perspective the outage
-        #         simply heals itself.
-        #
+        # Recover from a dropped connection and restore the session. This is the
+        # core fault-tolerance routine: after re-establishing the TCP link it
+        # transparently re-LOGINs (which also re-subscribes this node to
+        # publish-subscribe updates), so the outage recovers on its own.
         if not self._running:
             return
         self._set_state(STATE_RECONNECTING)
@@ -201,7 +196,7 @@ class ServerConnection:
         self._connect_with_retry()                  # re-establish the TCP link
         if self._running and self._credentials:
             user_id, username = self._credentials
-            # Re-LOGIN on the fresh socket; this re-subscribes us to updates.
+            # Re-LOGIN on the fresh socket; this re-subscribes the node to updates.
             self.request(protocol.ACTION_LOGIN, user_id=user_id, username=username)
 
     def _raw_send(self, message: dict) -> None:
@@ -250,7 +245,7 @@ class ServerConnection:
             time.sleep(_HEARTBEAT_INTERVAL)
             if self._state == STATE_CONNECTED:
                 # A failed PING raises/returns an error, which the listener turns
-                # into a reconnect; we do not need the result here.
+                # into a reconnect; the result is not needed here.
                 try:
                     self._raw_send({"type": protocol.TYPE_REQUEST,
                                     "id": next(self._id_counter),

@@ -53,14 +53,12 @@ class PubSubBroker:
             return len(self._subscribers)
 
     def publish(self, topic: str, payload: dict) -> int:
-        # Deliver one event to EVERY current subscriber. Returns the fan-out count.
-        #
-        #         Fault isolation: each subscriber is delivered to inside its own
-        #         try/except. A single dead or slow client (e.g. one whose socket has just
-        #         failed) therefore cannot break the broadcast for everyone else - a key
-        #         reliability property of the publish-subscribe design.
-        #
-        # Snapshot the registry under the lock, then deliver OUTSIDE the lock so
+        # Deliver one event to every current subscriber. Returns the fan-out count.
+        # Fault isolation: each subscriber is delivered to inside its own
+        # try/except, so a single dead or slow client (e.g. one whose socket has
+        # just failed) cannot break the broadcast for the rest - a key reliability
+        # property of the publish-subscribe design.
+        # Snapshot the registry under the lock, then deliver outside the lock so
         # a slow delivery cannot block other threads from (un)subscribing.
         with self._lock:
             targets = list(self._subscribers.items())
